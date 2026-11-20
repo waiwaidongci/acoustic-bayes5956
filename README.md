@@ -55,7 +55,7 @@ JWT有效期8小时；PBKDF2盐化哈希保存密码；角色每请求从数据�
 
 AcousticBatch / AcousticSample / ClassifierRun / InspectionNote 是核心实体；另有User和Audit。数据库实际表：`acoustic_batches` → `acoustic_samples` → `classifier_runs` → `inspection_notes`。样本以固定字段JSON保存，后端按以下字段严格验证，不接受未知字段替代必填值：均方根振幅（`rms`）、频谱质心 Hz（`centroid`）、峭度（`kurtosis`）、复核类型（`label`）。
 
-实体贯穿 `backend/src/models`、`schemas`、`services`、`controllers`、`routes`，以及 `frontend/src/api/research.js`、`stores/research.js` 和 `pages`。`Source.key` 与 `(Record.source_id, reference)` 为自然键；来源改名不会修改已冻结任务输入。业务说明在创建时保存结果快照，批准后从该快照导出。
+实体贯穿 `backend/src/models`、`schemas`、`services`、`controllers`、`routes`，以及 `frontend/src/api/research.js`、`stores/research.js` 和 `pages`。剔除复核另有 `RemovalAudit` / `RemovalFold`（`removal_audits` → `removal_fold_results`，`(audit_id, fold)` 唯一）。`Source.key` 与 `(Record.source_id, reference)` 为自然键；来源改名不会修改已冻结任务输入。业务说明在创建时保存结果快照，批准后从该快照导出。
 
 ## 算法与口径
 
@@ -69,6 +69,19 @@ GaussianNB与分层交叉验证、混淆矩阵和后验解释，全部计算位�
 失败态：业务字段缺失/非有限数值、参数越界、样本不足、退化特征或结构错误均明确拒绝或将任务标failed，错误消息保存在任务中。可回到来源或配置修正后重新执行，历史失败记录保留。
 
 已知边界：独立同分布、特征条件独立和高斯类条件是假设；后验未校准。演示数据刻意有分离度，准确率不代表真实设备效果。使用分层折外验证，不提供外部最终测试集。
+
+### 剔除复核（已完成研究）
+
+目的：判断一条错标样本会把多少条折外判读带偏。只对 `completed` 且带分折索引的GaussianNB任务开放，严格沿用原研究的同一分折（`training_indices` / `validation_indices`）、同一 `smoothing` 与同一训练内标准化口径，不重新分折。
+
+- 口径：逐件假设从**训练折**去掉一条样本；只重算该样本所在折的折外判读，其余折判读不变。**翻转件数**＝该折验证行中判读发生变化的条数，跨折累加后按件排名（降序）。
+- 与逐次重训一致：删除一条训练行后，标准化器与类均值/方差可由原始一、二阶矩闭式更新；随后对整折验证行批量计算标准化高斯联合对数似然，`argmax` 与 sklearn `predict` 相同（平票取最靠前的类型）。仅当胜出边际小到 float64 舍入可能改变 `argmax`（相对容差 `1e-6`）时，才对该件调用一次真实重训兜底，重训次数在页面公布。
+- 平票：翻转件数相同的样本按原研究输入顺序排列（`index` 升序）。
+- 缺类候选：剔除后若该训练折中至少一类不再有剩余样本，候选无法按原口径重算，**单列**于“缺类候选”，不参与排名；其翻转件数只累计仍可重算的折。
+- 内存与重试：按批（默认约32MB工作集）计算，不逐件拟合模型、不逐件重训；万条样本可直接运行。结果按 `(复核任务, 折)` 唯一落库，**中断后从已算完的折续跑**，重复投递或重试不会重复累加。
+- 公布时机：全部折齐了才在“完整结果”页公布排名；未齐时只显示已完成折数与续跑入口。原研究结果照常读取，剔除复核不修改任何原任务、快照或业务说明。
+- 接口：`GET /runs/{id}/removal`（阅读者亦可）、`POST /runs/{id}/removal`（分析师/负责人；已完成或进行中的复核复用同一任务，失败后重新发起即续跑）。复核由独立worker消费 `removal:queue`，与普通分析任务共用同一worker进程。
+
 
 ## 演示数据与一天剧本
 

@@ -1,0 +1,12 @@
+import {table} from '../components/common/table.js';import {session} from '../stores/session.js';import {esc} from '../utils/format.js';
+const RANK_LIMIT=20;
+const columns=[{key:'rank',label:'排名'},{key:'reference',label:'样本编号'},{key:'label',label:'复核类型'},{key:'flips',label:'翻转件数'},{key:'folds',label:'所在折'}];
+export function removalPanel(payload){
+  const audit=payload?.audit;
+  const start=session.writable?'<button id="removal-start">开始剔除复核 →</button>':'<p class="fine">剔除复核由分析师或负责人发起。</p>';
+  const head='<h2>剔除复核 <small>假设去掉一条训练样本，统计被带偏的折外判读件数</small></h2>';
+  if(!audit)return '<section class="removal">'+head+'<div class="removal-intro"><p>沿用原研究的同一分折与参数，逐件假设去掉一条训练样本；只重算该样本所在折的折外判读，翻转件数即被这一条样本带偏的其他样本数。</p><p class="fine">判读与逐次重训一致；平票沿用原规则取最靠前的类型。剔除后若训练折里某类型缺失，该候选单列、不参与排名。计算分批进行，不逐件重训；中断后从已算完的折续跑，重试不会重复累加。全部折齐后才公布排名，原研究结果照常阅读。</p>'+start+'</div></section>';
+  if(!payload.published)return '<section class="removal">'+head+'<div class="removal-progress"><span class="spinner"></span><h2>剔除复核进行中</h2><p>已算完 '+payload.progress.completed+' / '+payload.progress.total+' 折，全部折齐后才公布排名。'+(audit.state==='failed'?'<br>上次中断：'+esc(audit.error||'未能完成')+'，可从已算的折续跑。':'')+'</p>'+(audit.state==='failed'&&session.writable?'<button id="removal-start">从已算的折续跑 →</button>':'')+'</div></section>';
+  const totals=payload.totals||{};
+  return '<section class="removal">'+head+'<div class="removal-summary">'+'<p class="fine">候选 '+totals.candidates+' 件 · 翻转合计 '+totals.flips+' 件 · 单件最多带偏 '+totals.max_flips+' 件 · 缺类单列 '+totals.missing_candidates+' 件 · 数值平票重训 '+totals.retrained+' 次</p></div><p>排名按翻转件数从多到少；同分按样本在原研究中的输入顺序排列，平票规则与原研究一致。下表为前'+RANK_LIMIT+'名。</p>'+table(payload.ranking.slice(0,RANK_LIMIT),columns)+(payload.ranking.length>RANK_LIMIT?'<details><summary>展开其余排名（'+(payload.ranking.length-RANK_LIMIT)+' 件）</summary>'+table(payload.ranking.slice(RANK_LIMIT),columns,{limit:2000})+'</details>':'')+(payload.excluded_missing.length?'<h3>缺类候选（单列，不参与排名）</h3><p class="fine">剔除这些样本后，其训练折中至少有一类不再有剩余样本，无法按原口径重算折外判读；表中翻转件数只计仍可重算的折。</p>'+table(payload.excluded_missing,[{key:'reference',label:'样本编号'},{key:'label',label:'复核类型'},{key:'flips',label:'可计翻转件数'},{key:'folds',label:'所在折'}],{limit:2000})+'':'')+'<h3>分折核对</h3>'+table(payload.folds,[{key:'fold',label:'折'},{key:'candidates',label:'候选数'},{key:'validation',label:'验证行'},{key:'flips',label:'翻转合计'},{key:'missing',label:'缺类候选'},{key:'retrained',label:'数值平票重训'}])+'</section>';
+}

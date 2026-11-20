@@ -1,3 +1,4 @@
 -- SQLAlchemy metadata initializes tables idempotently.
 -- Domain tables: acoustic_batches, acoustic_samples, classifier_runs, inspection_notes.
--- Unique natural keys: source.key; (record.source_id, record.reference).
+-- Unique natural keys: source.key; (record.source_id, record.reference);
+-- Removal audit tables: removal_audits, removal_fold_results (unique audit_id+fold).
